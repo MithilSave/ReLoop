@@ -1,28 +1,96 @@
-# ── Python ────────────────────────────────────────────────
+# ==============================================================================
+# ReLoop - Root .gitignore
+# ==============================================================================
+
+# ── Machine Learning & Datasets ──────────────────────────────────────────────
+ml/data/
+ml/dataset/
+ml/datasets/
+ml/**/*.zip
+ml/**/*.tar.gz
+ml/output/best_model.*
+*.h5
+*.pt
+*.pth
+*.onnx
+*.pkl
+
+# Ensure production edge model and labels remain tracked for mobile app & backend
+!mobile/assets/models/plastic_classifier.tflite
+!mobile/assets/models/labels.txt
+!ml/output/plastic_classifier.tflite
+!ml/output/labels.txt
+!ml/output/plastic_classifier.keras
+
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
+*.egg
 *.egg-info/
 dist/
 build/
 backend/.venv/
+.venv/
+env/
 backend/.env
+.env
+.env.*.local
 *.db
+*.sqlite3
+.pytest_cache/
+.coverage
+htmlcov/
 
-# ── Node ──────────────────────────────────────────────────
+# ── Flutter / Dart / Mobile ──────────────────────────────────────────────────
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+mobile/build/
+**/build/
+android/app/debug/
+android/app/profile/
+android/app/release/
+*.apk
+*.aab
+*.ipa
+.gradle/
+**/android/.gradle/
+**/android/local.properties
+local.properties
+
+# ── Node.js / Frontend ───────────────────────────────────────────────────────
 node_modules/
 frontend/dist/
-.DS_Store
+frontend-legacy/dist/
+.npm/
+.eslintcache
 
-# ── IDE ───────────────────────────────────────────────────
+# ── Storage & Temporary Uploads ──────────────────────────────────────────────
+backend/storage/
+backend/uploads/
+storage/
+uploads/
+*.log
+*.tmp
+*.bak
+
+# ── IDEs & Editors ───────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
+*.iml
+*.ipr
+*.iws
 
-# ── Docker ────────────────────────────────────────────────
+# ── Docker ───────────────────────────────────────────────────────────────────
 docker-compose.override.yml
 
-# ── OS ────────────────────────────────────────────────────
+# ── Operating System Artifacts ───────────────────────────────────────────────
+.DS_Store
 Thumbs.db
 Desktop.ini
