@@ -23,6 +23,7 @@ from app.modules.auth.service import (
     authenticate_user,
     switch_active_org,
     refresh_tokens,
+    revoke_refresh_token,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -108,3 +109,14 @@ async def refresh(req: RefreshTokenRequest, db: AsyncSession = Depends(get_db)):
         access_token=access_token,
         refresh_token=refresh_token,
     )
+
+
+@router.post("/logout")
+async def logout(
+    req: RefreshTokenRequest,
+    context: AuthContext = Depends(get_current_user_and_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke the caller's refresh token. Access tokens stay valid until they expire."""
+    revoked = await revoke_refresh_token(db, context.user.id, req.refresh_token)
+    return {"status": "ok", "refresh_token_revoked": revoked}

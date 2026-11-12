@@ -29,6 +29,17 @@ from app.modules.recycler.schemas import (
 
 router = APIRouter(prefix="/recycler", tags=["recycler"])
 
+RECEIVABLE_STATUSES = ("PICKED_UP", "IN_TRANSIT")
+
+
+async def _processed_input_kg(db: AsyncSession, batch_id: uuid.UUID) -> float:
+    """Input kg of a batch already consumed by current processing records (integration patch #3)."""
+    stmt = select(func.coalesce(func.sum(ProcessingInput.input_kg), 0.0)).join(
+        ProcessingRecord, ProcessingInput.processing_record_id == ProcessingRecord.id
+    ).where(ProcessingInput.batch_id == batch_id, ProcessingRecord.is_current.is_(True))
+    res = await db.execute(stmt)
+    return float(res.scalar() or 0.0)
+
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -172,6 +183,24 @@ async def create_recycler_receipt(
     if not batch:
         raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Batch not found"}})
 
+    # Integration patch #3: only collected batches can be received, once, by their destination.
+    if batch.status not in RECEIVABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": {"code": "INVALID_STATE_TRANSITION", "message": f"Batch {batch.batch_code} is {batch.status}; only PICKED_UP or IN_TRANSIT batches can be received"}},
+        )
+    if batch.destination_recycler_org_id and batch.destination_recycler_org_id != context.org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": {"code": "FORBIDDEN_ORG", "message": f"Batch {batch.batch_code} is consigned to another recycler"}},
+        )
+    existing_stmt = select(RecyclerReceipt).where(RecyclerReceipt.batch_id == batch.id, RecyclerReceipt.is_current.is_(True))
+    if (await db.execute(existing_stmt)).scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": {"code": "RECEIPT_EXISTS", "message": f"Batch {batch.batch_code} already has a receipt; submit a correction instead"}},
+        )
+
     # Fetch active offer price if available
     offer_stmt = select(RecyclerOffer).where(
         RecyclerOffer.recycler_org_id == context.org_id,
@@ -251,6 +280,13 @@ async def correct_recycler_receipt(
             detail={"error": {"code": "QUANTITY_INCONSISTENT", "message": "accepted + rejected must equal received"}},
         )
 
+    already_processed = await _processed_input_kg(db, old.batch_id)
+    if req.accepted_kg + 0.001 < already_processed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": {"code": "ACCEPTED_BELOW_PROCESSED", "message": f"{already_processed:.3f} kg of this batch is already in processing runs; accepted kg cannot be lower",
+                              "details": {"processed_input_kg": f"{already_processed:.3f}"}}},
+        )
     old.is_current = False
     new_receipt = RecyclerReceipt(
         batch_id=old.batch_id,
@@ -315,6 +351,38 @@ async def create_processing_record(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": {"code": "QUANTITY_INCONSISTENT", "message": f"Eligible kg ({req.eligible_kg}) exceeds output kg ({req.output_kg})"}},
         )
+
+    # Integration patch #3: validate every input against accepted stock before writing anything.
+    requested_by_batch: dict = {}
+    receipt_for_batch: dict = {}
+    for inp in req.inputs:
+        rcpt = await db.get(RecyclerReceipt, inp.recycler_receipt_id)
+        if not rcpt:
+            raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": f"Receipt {inp.recycler_receipt_id} not found"}})
+        if rcpt.recycler_org_id != context.org_id:
+            raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN_ORG", "message": "Receipt does not belong to you"}})
+        if not rcpt.is_current:
+            raise HTTPException(status_code=409, detail={"error": {"code": "NOT_CURRENT", "message": "Receipt has been superseded by a correction; use the current version"}})
+        b = await db.get(WasteBatch, rcpt.batch_id)
+        if b and b.material_category_id != mat.id:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": {"code": "MATERIAL_MISMATCH", "message": f"Batch {b.batch_code} is not {mat.code}; a run processes one material"}},
+            )
+        receipt_for_batch[rcpt.batch_id] = rcpt
+        requested_by_batch[rcpt.batch_id] = requested_by_batch.get(rcpt.batch_id, 0.0) + inp.input_kg
+    for batch_id, requested in requested_by_batch.items():
+        rcpt = receipt_for_batch[batch_id]
+        processed = await _processed_input_kg(db, batch_id)
+        available = max(0.0, rcpt.accepted_kg - processed)
+        if requested > available + 0.001:
+            b = await db.get(WasteBatch, batch_id)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": {"code": "INPUT_EXCEEDS_AVAILABLE",
+                                  "message": f"Batch {b.batch_code if b else batch_id}: requested {requested:.3f} kg exceeds available {available:.3f} kg",
+                                  "details": {"accepted_kg": f"{rcpt.accepted_kg:.3f}", "processed_input_kg": f"{processed:.3f}", "available_kg": f"{available:.3f}"}}},
+            )
 
     # Compute yield
     yield_pct = round((req.output_kg / total_input) * 100, 3)
@@ -539,3 +607,43 @@ async def get_recycler_capacity(
         "utilization_pct": utilization_pct,
         "remaining_capacity_kg": max(0.0, monthly_cap - processed_this_month),
     }
+
+
+@router.get("/receipts")
+async def list_recycler_receipts(
+    include_history: bool = Query(False),
+    context: AuthContext = Depends(require("RECYCLER")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Receipts recorded by the caller (integration patch #2). Current versions by default."""
+    stmt = select(RecyclerReceipt, WasteBatch, MaterialCategory).join(
+        WasteBatch, RecyclerReceipt.batch_id == WasteBatch.id
+    ).join(
+        MaterialCategory, WasteBatch.material_category_id == MaterialCategory.id
+    ).where(RecyclerReceipt.recycler_org_id == context.org_id).order_by(desc(RecyclerReceipt.received_at))
+    if not include_history:
+        stmt = stmt.where(RecyclerReceipt.is_current.is_(True))
+    res = await db.execute(stmt)
+    out = []
+    for r, b, m in res.all():
+        processed = await _processed_input_kg(db, b.id) if r.is_current else None
+        out.append({
+            "id": r.id,
+            "batch_id": b.id,
+            "batch_code": b.batch_code,
+            "batch_status": b.status,
+            "material_code": m.code,
+            "version": r.version,
+            "is_current": r.is_current,
+            "supersedes_id": r.supersedes_id,
+            "received_kg": r.received_kg,
+            "accepted_kg": r.accepted_kg,
+            "rejected_kg": r.rejected_kg,
+            "quality_grade": r.quality_grade,
+            "contamination_pct": r.contamination_pct,
+            "rejection_disposition": r.rejection_disposition,
+            "received_at": r.received_at,
+            "processed_input_kg": processed,
+            "available_kg": max(0.0, r.accepted_kg - processed) if processed is not None else None,
+        })
+    return out

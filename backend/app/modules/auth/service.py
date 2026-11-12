@@ -208,6 +208,11 @@ async def refresh_tokens(db: AsyncSession, refresh_token_raw: str) -> Tuple[User
             detail={"error": {"code": "UNAUTHENTICATED", "message": "Invalid refresh token"}},
         )
 
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": {"code": "UNAUTHENTICATED", "message": "Not a refresh token"}},
+        )
     user_id = uuid.UUID(payload.get("sub"))
     token_h = hash_token(refresh_token_raw)
 
@@ -219,7 +224,11 @@ async def refresh_tokens(db: AsyncSession, refresh_token_raw: str) -> Tuple[User
     res = await db.execute(stmt)
     record = res.scalar_one_or_none()
 
-    if not record or record.expires_at < datetime.now(timezone.utc):
+    expires_at = record.expires_at if record else None
+    if expires_at is not None and expires_at.tzinfo is None:
+        # SQLite returns naive datetimes; values are stored in UTC.
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if not record or expires_at < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": {"code": "UNAUTHENTICATED", "message": "Refresh token expired or revoked"}},
@@ -263,3 +272,19 @@ async def refresh_tokens(db: AsyncSession, refresh_token_raw: str) -> Tuple[User
     await db.commit()
 
     return user, org, role, new_access_token, new_refresh_token
+
+
+async def revoke_refresh_token(db: AsyncSession, user_id: uuid.UUID, refresh_token_raw: str) -> bool:
+    """Revoke one refresh token belonging to the caller. Returns True if a live token was revoked."""
+    stmt = select(RefreshToken).where(
+        RefreshToken.user_id == user_id,
+        RefreshToken.token_hash == hash_token(refresh_token_raw),
+        RefreshToken.revoked_at.is_(None),
+    )
+    res = await db.execute(stmt)
+    record = res.scalar_one_or_none()
+    if not record:
+        return False
+    record.revoked_at = datetime.now(timezone.utc)
+    await db.commit()
+    return True
