@@ -1,31 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'services/app_state.dart';
-import 'theme/app_theme.dart';
-import 'screens/home_shell.dart';
 
+import 'app.dart';
+
+/// ReLoop mobile and desktop app. Every screen reads and writes the FastAPI backend; there is no mock data.
+///
+/// Backend address: set it on the login screen ("API: …"), or at build time with
+///   flutter run --dart-define=API_BASE_URL=http://192.168.1.20:8000
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => AppState()),
-      ],
-      child: const ReLoopApp(),
-    ),
-  );
-}
-
-class ReLoopApp extends StatelessWidget {
-  const ReLoopApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'ReLoop Circular Platform',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      home: const HomeShell(),
-    );
-  }
+  runApp(const ReLoopApp());
 }

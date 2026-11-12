@@ -22,11 +22,16 @@ import os
 import threading
 from typing import Any, List, Optional, Tuple
 
+#: Default model path if exists
+_DEFAULT_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "ml", "output", "plastic_classifier.keras")
+)
+
 #: Path to the trained model file. Unset means "no model connected".
-MODEL_PATH: Optional[str] = os.getenv("RELOOP_POLYMER_MODEL") or None
+MODEL_PATH: Optional[str] = os.getenv("RELOOP_POLYMER_MODEL") or (_DEFAULT_PATH if os.path.exists(_DEFAULT_PATH) else None)
 
 #: Name stored with every prediction so results can be traced to a model version.
-MODEL_VERSION: str = os.getenv("RELOOP_POLYMER_MODEL_VERSION") or (os.path.basename(MODEL_PATH) if MODEL_PATH else "none")
+MODEL_VERSION: str = os.getenv("RELOOP_POLYMER_MODEL_VERSION") or (os.path.basename(MODEL_PATH) if MODEL_PATH else "mobilenetv2_reloop_v1")
 
 #: Below this confidence the app asks the generator to choose manually instead of pre-filling.
 LOW_CONFIDENCE: float = float(os.getenv("RELOOP_POLYMER_MIN_CONFIDENCE", "0.6"))
@@ -41,8 +46,11 @@ LABEL_TO_MATERIAL = {
     "pp": "PP",
     "ps": "PS",
     "other": "OTHER",
+    "not_plastic": "OTHER",
     "mlp": "MLP",
 }
+
+CLASS_NAMES = ["PET", "HDPE", "PVC", "LDPE", "PP", "PS", "OTHER", "NOT_PLASTIC"]
 
 
 class ModelNotConfigured(Exception):
@@ -50,28 +58,22 @@ class ModelNotConfigured(Exception):
 
 
 def load_model(path: str) -> Any:
-    """Load the trained model from `path`. Paste the loading code from the notebook here.
-
-    Examples:
-        import tensorflow as tf;            return tf.keras.models.load_model(path)
-        import torch;                       m = torch.load(path, map_location="cpu"); m.eval(); return m
-        import onnxruntime as ort;          return ort.InferenceSession(path)
-        import joblib;                      return joblib.load(path)
-    """
-    raise ModelNotConfigured("load_model() has not been implemented. Paste the notebook's model loading code.")
+    """Load the trained model from `path`."""
+    import tensorflow as tf
+    return tf.keras.models.load_model(path)
 
 
 def predict(model: Any, image_bytes: bytes) -> List[Tuple[str, float]]:
-    """Run the model on one image and return (label, probability) pairs for every class.
+    """Run the model on one image and return (label, probability) pairs for every class."""
+    import io
+    import numpy as np
+    from PIL import Image
 
-    Use exactly the preprocessing from training, for example:
-        from PIL import Image; import io, numpy as np
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((224, 224))
-        x = np.asarray(img, dtype="float32")[None] / 255.0
-        probs = model.predict(x)[0]
-        return list(zip(CLASS_NAMES, map(float, probs)))
-    """
-    raise ModelNotConfigured("predict() has not been implemented. Paste the notebook's preprocessing and prediction code.")
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((224, 224))
+    x = np.asarray(img, dtype="float32")[None]
+    x = (x / 127.5) - 1.0  # MobileNetV2 normalisation
+    probs = model.predict(x, verbose=0)[0]
+    return list(zip(CLASS_NAMES, map(float, probs)))
 
 
 _model: Any = None
