@@ -2,7 +2,7 @@
 
 import uuid
 from typing import Any, Dict
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -203,3 +203,83 @@ async def approve_org(
     org.approval_status = req.decision.upper()
     await db.commit()
     return {"status": "ok", "org_id": org.id, "approval_status": org.approval_status, "note": req.note}
+
+
+# ── DIRECTORY (integration patch #1) ───────────────────────
+# Read-only listing so participants can choose counterparties by name
+# (consignment destination, allocation client, recycler records) and so
+# platform admins can find organisations awaiting approval.
+
+_DIRECTORY_TYPES = {"GENERATOR", "COLLECTOR", "RECYCLER", "NGO", "EPR_CLIENT"}
+
+
+async def _directory_entry(db: AsyncSession, org: Organisation, include_contact: bool) -> Dict[str, Any]:
+    entry: Dict[str, Any] = {
+        "id": org.id,
+        "org_type": org.org_type,
+        "legal_name": org.legal_name,
+        "display_name": org.display_name,
+        "city_id": org.city_id,
+        "approval_status": org.approval_status,
+    }
+    # Public registration fields only; no payout or contact data.
+    if org.org_type == "RECYCLER":
+        p = await db.get(RecyclerProfile, org.id)
+        if p:
+            entry["registration"] = {
+                "pwp_registration_no": p.pwp_registration_no,
+                "registration_valid_until": str(p.registration_valid_until) if p.registration_valid_until else None,
+                "processing_type": p.processing_type,
+                "spcb": p.spcb,
+            }
+    elif org.org_type == "EPR_CLIENT":
+        p = await db.get(EPRClientProfile, org.id)
+        if p:
+            entry["registration"] = {"epr_registration_no": p.epr_registration_no, "pibo_type": p.pibo_type}
+    elif org.org_type == "NGO":
+        p = await db.get(NGOProfile, org.id)
+        if p:
+            entry["registration"] = {"registration_no": p.registration_no, "registration_type": p.registration_type}
+    if include_contact:
+        entry["address"] = org.address
+        entry["gstin"] = org.gstin
+    return entry
+
+
+@router.get("")
+async def list_organisations(
+    org_type: str | None = None,
+    context: AuthContext = Depends(require()),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approved organisations, optionally filtered by type. Generators are never listed (privacy)."""
+    stmt = select(Organisation).where(Organisation.approval_status == "APPROVED").order_by(Organisation.legal_name)
+    if org_type:
+        t = org_type.upper()
+        if t not in _DIRECTORY_TYPES:
+            raise HTTPException(status_code=400, detail={"error": {"code": "VALIDATION_ERROR", "message": f"Unknown org_type '{org_type}'"}})
+        stmt = stmt.where(Organisation.org_type == t)
+    stmt = stmt.where(Organisation.org_type != "GENERATOR")
+    res = await db.execute(stmt)
+    return [await _directory_entry(db, o, include_contact=False) for o in res.scalars().all()]
+
+
+@admin_router.get("")
+async def admin_list_organisations(
+    status_filter: str | None = Query(None, alias="status"),
+    org_type: str | None = None,
+    context: AuthContext = Depends(get_current_user_and_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if not context.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": {"code": "FORBIDDEN_ROLE", "message": "Only platform admins can list all organisations"}},
+        )
+    stmt = select(Organisation).order_by(Organisation.created_at.desc() if hasattr(Organisation, "created_at") else Organisation.legal_name)
+    if status_filter:
+        stmt = stmt.where(Organisation.approval_status == status_filter.upper())
+    if org_type:
+        stmt = stmt.where(Organisation.org_type == org_type.upper())
+    res = await db.execute(stmt)
+    return [await _directory_entry(db, o, include_contact=True) for o in res.scalars().all()]

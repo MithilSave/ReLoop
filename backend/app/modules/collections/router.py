@@ -238,6 +238,14 @@ async def record_pickup(
             detail={"error": {"code": "INVALID_STATE_TRANSITION", "message": f"Cannot pick up batch in status {batch.status}"}},
         )
 
+    # Integration patch #3: one pickup record per batch until the generator confirms it.
+    existing_stmt = select(PickupRecord).where(PickupRecord.batch_id == batch.id, PickupRecord.is_current.is_(True))
+    if (await db.execute(existing_stmt)).scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail={"error": {"code": "PICKUP_ALREADY_RECORDED", "message": "A pickup weight is already recorded for this batch and awaits generator confirmation"}},
+        )
+
     # Offer rate
     rate = 15.0  # default rate
     if batch.accepted_offer_id:

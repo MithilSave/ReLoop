@@ -54,7 +54,13 @@ async def get_current_user_and_context(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": {"code": "TOKEN_EXPIRED" if "expired" in str(exc) else "UNAUTHENTICATED", "message": str(exc)}},
+            detail={"error": {"code": "TOKEN_EXPIRED" if "Signature has expired" in str(exc) else "UNAUTHENTICATED", "message": str(exc)}},
+        )
+
+    if payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": {"code": "UNAUTHENTICATED", "message": "Access token required"}},
         )
 
     user_id_str = payload.get("sub")

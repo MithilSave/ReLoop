@@ -177,6 +177,11 @@ async def submit_verification_decision(
     if not old_ver:
         raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Verification record not found"}})
 
+    if not old_ver.is_current:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": {"code": "NOT_CURRENT", "message": "This verification has been superseded; act on the current record"}},
+        )
     dec = req.decision.upper()
     if dec not in ["VERIFIED", "FLAGGED", "REJECTED", "REQUIRES_CORRECTION"]:
         raise HTTPException(
