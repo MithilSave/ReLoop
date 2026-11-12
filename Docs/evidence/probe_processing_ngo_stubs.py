@@ -1,0 +1,35 @@
+import httpx, json, sqlite3
+B="http://localhost:8000/api/v1"; c=httpx.Client(timeout=30,headers={"Connection":"close"})
+T={k:c.post(B+"/auth/login",json={"login":k+"@reloop.in","password":"reloop123"}).json() for k in ["generator","collector","recycler","ngo","epr","admin"]}
+H=lambda k:{"Authorization":"Bearer "+T[k]["access_token"]}
+def show(t,r): print(f"\n## {t}: {r.status_code} {r.text[:260]}")
+db=sqlite3.connect("/home/claude/mithilsave/reloop/backend/reloop.db")
+rid,acc=db.execute("select r.id,r.accepted_kg from recycler_receipts r join waste_batches b on b.id=r.batch_id where b.batch_code='RL-MUM-2026-000104' and r.is_current=1").fetchone()
+import uuid; rid=str(uuid.UUID(rid)) if len(rid)==32 else rid
+print("receipt 104 accepted:",acc)
+body=lambda kg,out:{"material_code":"HDPE","run_started_at":"2026-11-12T08:00:00Z","run_ended_at":"2026-11-12T10:00:00Z","inputs":[{"recycler_receipt_id":rid,"input_kg":kg}],"output_kg":out,"residue_kg":1,"eligible_kg":out}
+show(f"process 5000kg from {acc}kg receipt, wrong material HDPE", c.post(B+"/recycler/processing-records",headers=H("recycler"),json=body(5000,4000)))
+show("process same receipt again", c.post(B+"/recycler/processing-records",headers=H("recycler"),json=body(acc,acc*0.9)))
+show("batch 104 detail now", c.get(B+"/batches/RL-MUM-2026-000104",headers=H("recycler")))
+print("\nverification ngo orgs:",db.execute("select o.legal_name, v.decision, count(*) from ngo_verifications v join organisations o on o.id=v.ngo_org_id where v.is_current=1 group by 1,2").fetchall())
+for p in ["/orgs","/admin/orgs","/organisations"]: show("GET "+p, c.get(B+p,headers=H("admin")))
+an=c.get(B+"/anomalies",headers=H("collector")).json(); print("\nanomalies visible to collector:",len(an), [a["rule_code"] for a in an])
+if an: show("collector resolves anomaly", c.post(B+f"/anomalies/{an[0]['id']}/resolve",headers=H("collector"),json={"status":"RESOLVED","note":"probe"}))
+show("GET /b/{code} (README)", c.get("http://localhost:8000/b/RL-MUM-2026-000105"))
+show("passport without auth", c.get(B+"/passports/RL-MUM-2026-000105"))
+show("EPR dashboard", c.get(B+"/epr/dashboard",headers=H("epr")))
+show("allocation-request (persisted?)", c.post(B+"/epr/allocation-requests",headers=H("epr"),json={"recycler_org_id":T["recycler"]["org"]["id"],"packaging_category":"CAT_I","reporting_period":"FY2026-27","quantity_kg":50}))
+print(" allocation-related tables:",[r[0] for r in db.execute("select name from sqlite_master where type='table' and name like '%request%'")])
+show("generator certificates", c.get(B+"/generator/certificates",headers=H("generator")))
+show("ai classify (no input)", c.post(B+"/ai/classify",headers=H("generator"),json={}))
+show("shortages HDPE", c.get(B+"/forecasts/shortages?material=LDPE",headers=H("recycler")))
+show("upload-url", c.post(B+"/documents/upload-url",headers=H("generator"),json={"doc_type":"PHOTO_LISTING"}))
+show("plans as collector", c.get(B+"/aggregation/plans",headers=H("collector")))
+show("pickup twice: pickup on ASSIGNED 102", c.post(B+"/collections/"+c.get(B+"/batches/RL-MUM-2026-000102",headers=H("collector")).json()["id"]+"/pickup",headers=H("collector"),json={"collected_kg":50}))
+bid=c.get(B+"/batches/RL-MUM-2026-000102",headers=H("collector")).json()["id"]
+show("pickup again same batch", c.post(B+f"/collections/{bid}/pickup",headers=H("collector"),json={"collected_kg":55}))
+show("batch 102 detail after 2 pickups", c.get(B+f"/batches/{bid}",headers=H("collector")))
+show("422 format", c.post(B+"/batches",headers=H("generator"),json={"material_code":"PET"}))
+show("403 format", c.post(B+"/batches",headers=H("collector"),json={}))
+show("401 format", c.get(B+"/batches"))
+show("expired-ish bad token", c.get(B+"/batches",headers={"Authorization":"Bearer abc"}))
