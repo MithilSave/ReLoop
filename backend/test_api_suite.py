@@ -331,10 +331,12 @@ async def run_tests():
         print(f" [PASS] GET /api/v1/forecasts/shortages -> Confirmed: {shortage['confirmed_supply_kg']} kg, Predicted: {shortage['predicted_supply_kg']} kg, Gap: {shortage['gap_confirmed_kg']} kg")
 
         print("\n================== 11. AI POLYMER CLASSIFICATION ================")
-        r = await client.post("/api/v1/ai/classify", headers=gen_headers, json={"sample_text": "clear bottle with neck ring"})
-        assert r.status_code == 200
-        ai_res = r.json()
-        print(f" [PASS] POST /api/v1/ai/classify -> Predicted: {ai_res['predicted_code']} (RIC #{ai_res['resin_code']}), Confidence: {ai_res['confidence']*100}%")
+        # The placeholder prediction was removed: with no model connected the endpoint must refuse, not guess.
+        # test_ai_classifier.py covers the connected-model path.
+        import base64
+        r = await client.post("/api/v1/ai/classify", headers=gen_headers, json={"image_base64": base64.b64encode(b"img").decode()})
+        assert r.status_code == 503 and r.json()["error"]["code"] == "AI_MODEL_NOT_CONFIGURED", r.text
+        print(" [PASS] POST /api/v1/ai/classify -> 503 AI_MODEL_NOT_CONFIGURED (no model connected; no placeholder prediction)")
 
         print("\n================== 12. IMPACT SUMMARY ===========================")
         r = await client.get("/api/v1/impact/summary")

@@ -37,26 +37,6 @@ class ApiService {
     final savedBase = prefs.getString('api_base_url');
     if (savedBase != null && savedBase.isNotEmpty) {
       _baseUrl = savedBase;
-      return;
-    }
-
-    if (!kIsWeb) {
-      try {
-        if (Platform.isAndroid) {
-          // Probe localhost (active on physical phone via `adb reverse`)
-          try {
-            final res = await http
-                .get(Uri.parse('http://127.0.0.1:8000/health'))
-                .timeout(const Duration(milliseconds: 600));
-            if (res.statusCode == 200) {
-              _baseUrl = 'http://127.0.0.1:8000/api/v1';
-              return;
-            }
-          } catch (_) {}
-          // Fallback to emulator host loopback
-          _baseUrl = 'http://10.0.2.2:8000/api/v1';
-        }
-      } catch (_) {}
     }
   }
 

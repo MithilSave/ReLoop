@@ -1,1 +1,35 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tokens carried over from the Phase 1 design system: forest green brand, restrained emerald accent,
+   slightly green-biased neutrals, thin borders, 8–10px radii. */
+:root {
+  --brand:#0F3D2E; --brand-2:#185C45; --brand-fg:#FFFFFF; --accent:#0E9F6E; --accent-soft:#E3F4EC;
+  --bg:#F6F7F6; --surface:#FFFFFF; --surface-2:#F1F3F2; --line:#E2E6E4; --line-2:#CFD6D3;
+  --fg:#15201C; --fg-2:#4A5752; --fg-3:#6F7B77;
+  --ok:#0E7C55; --ok-bg:#E3F4EC; --warn:#9A5806; --warn-bg:#FBF0DC; --bad:#B42318; --bad-bg:#FDECEA; --info:#2457A6; --info-bg:#E8EFFA; --neu-bg:#EEF0EF;
+  --c1:#0F3D2E; --c2:#2E9B72; --c3:#8CCBAF; --c4:#C9A23A; --c5:#B42318; --c6:#9AA6A1;
+  --sh:0 1px 2px rgba(16,32,26,.06); --sh-2:0 10px 30px rgba(16,32,26,.16);
+  --sidebar:#0F3D2E; --sidebar-fg:#C8D9D1; --sidebar-act:#1C5643;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand:#5FC79C; --brand-2:#7BD3AE; --brand-fg:#0B1310; --accent:#34C48B; --accent-soft:#163428;
+    --bg:#0E1412; --surface:#151D1A; --surface-2:#1B2521; --line:#26322D; --line-2:#34433D;
+    --fg:#E6ECE9; --fg-2:#A9B6B1; --fg-3:#84928C;
+    --ok:#4CC492; --ok-bg:#153227; --warn:#E3A34B; --warn-bg:#352812; --bad:#F2766B; --bad-bg:#3A1A17; --info:#7EA8EE; --info-bg:#1A2740; --neu-bg:#222C28;
+    --c1:#7BD3AE; --c2:#3A9E77; --c3:#2A5E4A; --c4:#D9B65A; --c5:#F2766B; --c6:#5D6B66;
+    --sh:0 1px 2px rgba(0,0,0,.3); --sh-2:0 10px 30px rgba(0,0,0,.5);
+    --sidebar:#0B1310; --sidebar-fg:#9FB2AA; --sidebar-act:#173A2D;
+    color-scheme: dark;
+  }
+}
+html, body, #root { height: 100%; }
+body { @apply bg-bg text-fg font-sans antialiased; font-size: 14px; line-height: 1.45; }
+.tnum { font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.safe-b { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-t { padding-top: env(safe-area-inset-top, 0px); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

@@ -185,6 +185,13 @@ async def create_batch(
     db.add(batch)
     await db.flush()
 
+    # Record what the generator finally chose against the AI suggestion (feedback for the model).
+    if input_data.ai_prediction_id:
+        from app.models.audit import AIPrediction
+        pred = await db.get(AIPrediction, input_data.ai_prediction_id)
+        if pred is not None:
+            pred.user_confirmed_code = mat.code
+
     # Link documents if provided
     if input_data.document_ids:
         for doc_id in input_data.document_ids:
